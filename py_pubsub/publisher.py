@@ -2,7 +2,6 @@ import rclpy
 from rclpy.node import Node
 from my_package.msg import CustomMessage
 
-from py_pubsub.test import arm
 
 
 class CustomPublisher(Node):
@@ -12,7 +11,6 @@ class CustomPublisher(Node):
         self.timer = self.create_timer(1.0, self.publish_message)
 
     def publish_message(self):
-        arm.callback("92929292")
         msg = CustomMessage(name="sdf", age=234, height=6.2)
         msg.name = "Bob"
         msg.age = 30
