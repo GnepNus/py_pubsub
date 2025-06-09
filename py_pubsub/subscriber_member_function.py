@@ -1,14 +1,15 @@
 import asyncio
 import json
 import threading
+from contextlib import asynccontextmanager
 from typing import Generic
 
 import rclpy
 import uvicorn
+import websockets
 from action_tutorials_interfaces.action import Fibonacci
 from fastapi import FastAPI
 from loguru import logger
-from pydantic import BaseModel
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rosidl_runtime_py import message_to_ordereddict
@@ -16,6 +17,27 @@ from starlette.websockets import WebSocket
 
 from std_msgs.msg import String
 
+async def start_websocket_client(uri: str):
+    while True:
+        try:
+            async with websockets.connect(uri) as websocket:
+                logger.warning("已连接到 WebSocket 服务器 walker")
+                MAP_POSE_CLIENT2.ws = websocket
+                while True:
+                    await websocket.recv()
+        except Exception:
+            logger.warning("无法连接到 WebSocket 服务器，2秒后重新连接...")
+            MAP_POSE_CLIENT2.ws = None
+            await asyncio.sleep(2)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 应用启动时执行
+    task = asyncio.create_task(start_websocket_client("ws://localhost:9513/ws22"))
+    yield
+    # 应用关闭时可执行清理任务
+    task.cancel()
 
 class MinimalSubscriber(Node):
 
@@ -63,7 +85,7 @@ class MinimalSubscriber(Node):
         current_thread = threading.current_thread()
         print(f"当前线程: {current_thread}")
         result = future.result().result
-        self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.ws.send_text(json.dumps(message_to_ordereddict(result)))))
+        self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.ws.send(json.dumps(message_to_ordereddict(result)))))
         self.get_logger().info('Result: {0}'.format(result.sequence))
 
     def feedback_callback(self, feedback_msg):
@@ -71,13 +93,13 @@ class MinimalSubscriber(Node):
         current_thread = threading.current_thread()
         print(f"当前线程: {current_thread}")
         feedback = feedback_msg.feedback
-        self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.ws.send_text(json.dumps(message_to_ordereddict(feedback)))))
+        self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.ws.send(json.dumps(message_to_ordereddict(feedback)))))
         self.get_logger().info('Received feedback: {0}'.format(feedback.partial_sequence))
 
     def listener_callback(self, msg):
         self.get_logger().info('I heard: "%s"' % msg.data)
 
-app3 = FastAPI()
+app3 = FastAPI(lifespan=lifespan)
 
 MAP_POSE_CLIENT2: MinimalSubscriber = None
 
@@ -97,6 +119,20 @@ async def websocket_endpoint(websocket: WebSocket):
             # 可以处理来自客户端的数据
     except Exception as e:
         websocket.close()
+
+
+
+@app3.websocket("/ws22")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    MAP_POSE_CLIENT2.ws = websocket
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"ws2222222222 rec: {data}")
+    except Exception as e:
+        websocket.close()
+
 
 def run_loop():
     MAP_POSE_CLIENT2.loop = asyncio.new_event_loop()
